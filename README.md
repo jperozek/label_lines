@@ -1,6 +1,8 @@
 # label_lines
 Automatically labels lines with rotation in Matplotlib
 
+Primarily taken from https://pypi.org/project/matplotlib-label-lines/
+
 
 Example:
 labelLines(lines, 
