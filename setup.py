@@ -17,5 +17,5 @@ setuptools.setup(
     },
     license='MIT',
     packages=['label_lines'],
-    install_requires=['math', 'numpy', 'matplotlib', 'datetime', 'scipy', ],
+    install_requires=['numpy', 'matplotlib', 'datetime', 'scipy'],
 )
