@@ -7,17 +7,26 @@ from matplotlib.dates import date2num, DateConverter, num2date
 from matplotlib.container import ErrorbarContainer
 from datetime import datetime
 from scipy.ndimage.filters import uniform_filter1d
+from scipy.signal import savgol_filter
 import matplotlib.text as mtext
 import matplotlib.transforms as mtransforms
+from scipy.interpolate import interp1d
 
 
 class RotationAwareAnnotation2(mtext.Annotation):
     def __init__(self, s, xy, p, pa=None, ax=None, line=None, **kwargs):
+        '''
+            xy: first point
+            p: second point to align to
+            pa: first point to align to (same as xy...)
+        '''
         self.rotation_on = True
         self.ax = ax or plt.gca()
+        self.fig = ax.get_figure()
         self.p = p
         if not pa:
             self.pa = xy
+
         kwargs.update(rotation_mode=kwargs.get("rotation_mode", "anchor"))
         mtext.Annotation.__init__(self, s, xy, **kwargs)
         self.set_transform(mtransforms.IdentityTransform())
@@ -26,6 +35,36 @@ class RotationAwareAnnotation2(mtext.Annotation):
         self.ax._add_text(self)
         if line:
             self.line = line
+        
+        # Get the length of the text box and re-calculate alignment point
+        self.fig.draw_without_rendering()
+        self.bb = self.get_window_extent()
+        self.bb_data = ax.transData.inverted().transform_bbox(self.bb)
+        self.dx = self.bb.x1 - self.bb.x0
+        self.length = np.sqrt((self.bb.x1-self.bb.x0)**2 + (self.bb.y1-self.bb.y0)**2)
+        self.p = self.find_end_pt()
+
+    def find_end_pt(self):
+        x1, y1 = self.xy
+        x = self.line.get_xdata()
+        y = self.line.get_ydata()
+        f_interp = interp1d(x, y, kind='quadratic', fill_value='extrapolate')
+        xscale = self.ax.get_xscale()
+        if xscale == 'linear':
+            x = np.linspace(x.min(), x.max(), 200)
+        else:
+            x = np.logspace(np.log10(x.min()), np.log10(x.max()), 200)
+        y = f_interp(x)
+        # find start index
+        idx = np.argmin(np.abs(x-x1))
+        x_pix, y_pix = self.ax.transData.transform(np.vstack([x[idx:], y[idx:]]).T).T
+        dist = [((xp - x_pix[0])**2 + (yp - y_pix[0])**2)**0.5 for xp, yp in zip(x_pix, y_pix)]
+        end_idx = np.argmin(np.abs(self.length - dist))
+        x2_pix = x_pix[end_idx]
+        y2_pix = y_pix[end_idx]
+        x2, y2 = self.ax.transData.inverted().transform([x2_pix, y2_pix])
+        return [x2, y2]
+
 
     def calc_angle(self):
         if self.rotation_on:
@@ -115,9 +154,8 @@ def is_collision(ax, lines, tb, hit_tol=1):
     return collision
 
 
-
 # Label line with line2D label data
-def labelLine(line, x, label=None, align=True, drop_label=False, filter_length = 1, **kwargs):
+def labelLine(line, x, label=None, align=True, drop_label=False, filter_length = 1, align_length=1, **kwargs):
     '''Label a single matplotlib line at position x
 
     Parameters
@@ -138,8 +176,17 @@ def labelLine(line, x, label=None, align=True, drop_label=False, filter_length =
     xdata = line.get_xdata()
     ydata = line.get_ydata()
 
+    f_interp = interp1d(xdata, ydata, kind='quadratic', fill_value='extrapolate')
+    xscale = ax.get_xscale()
+    if xscale == 'linear':
+        xdata = np.linspace(xdata.min(), xdata.max(), 200)
+    else:
+        xdata = np.logspace(np.log10(xdata.min()), np.log10(xdata.max()), 200)
+    ydata = f_interp(xdata)
+
     #filter data
-    ydata = uniform_filter1d(ydata, filter_length)
+    if filter_length > 1:
+        ydata = savgol_filter(ydata, filter_length, polyorder=2)
 
     mask = np.isfinite(ydata)
     if mask.sum() == 0:
@@ -162,9 +209,11 @@ def labelLine(line, x, label=None, align=True, drop_label=False, filter_length =
         return date2num(x) if isinstance(x, datetime) else x
 
     xfa = x_to_float(xa)
-    xfb = x_to_float(xb)
+    try: xfb = x_to_float(xdata[i+align_length])
+    except: xfb = x_to_float(xdata[-1])
     ya = ydata[i]
-    yb = ydata[i + 1]
+    try: yb = ydata[i+align_length]
+    except: yb = ydata[-1]
     y = ya + (yb - ya) * (x_to_float(x) - xfa) / (xfb - xfa) #Calculates y based on linear extrapolation?
 
     if not (np.isfinite(ya) and np.isfinite(yb)):
@@ -213,7 +262,7 @@ def labelLine(line, x, label=None, align=True, drop_label=False, filter_length =
         
     return txt
         
-def labelLines(lines, align=True, xvals=None, check_collision=False, drop_label=False, filter_length=1, hit_tol=1, **kwargs):
+def labelLines(lines, align=True, xvals=None, check_collision=False, drop_label=False, filter_length=1, align_length=1, hit_tol=1, **kwargs):
     '''Label all lines with their respective legends.
 
     Parameters
@@ -268,7 +317,7 @@ def labelLines(lines, align=True, xvals=None, check_collision=False, drop_label=
 
     textboxes = []
     for line, x, label in zip(labLines, xvals, labels):
-        textboxes.append(labelLine(line, x, label, align, drop_label, filter_length=filter_length, **kwargs))
+        textboxes.append(labelLine(line, x, label, align, drop_label, filter_length=filter_length, align_length=align_length, **kwargs))
 
     if check_collision:
         for textbox in textboxes:
