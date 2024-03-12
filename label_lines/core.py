@@ -11,6 +11,8 @@ from scipy.signal import savgol_filter
 import matplotlib.text as mtext
 import matplotlib.transforms as mtransforms
 from scipy.interpolate import interp1d
+from shapely.geometry.polygon import Polygon
+from shapely.geometry.linestring import LineString
 
 
 class RotationAwareAnnotation2(mtext.Annotation):
@@ -83,27 +85,8 @@ class RotationAwareAnnotation2(mtext.Annotation):
 
     _rotation = property(_get_rotation, _set_rotation)
 
-
-def is_collision(ax, lines, tb, hit_tol=1):
-    ''' Checks to see if the textbox collides with any data points
-        for lines already passed. Very convoluted. 
-
-        The goal is to use the contains_points method of a polygon patch,
-        however we need to be careful about rotating in display coordinates
-        so that there is no distortion from our axis not being square.
-
-        Only work on initial drawing. Does not resize with plot. One day 
-        this should be made into a property or the RotationAwareAnnotation 
-        class, however it currently requires the figure to be redrawn,
-        which takes too much time.  
-
-        ax: axes object for figure
-        lines: all lines being plotted
-        tb: The textbox to see if a line intersects
-        hit_tol: The number of points that are allowed to fall within the 
-                hit box until a collision is detected
-    '''
-    # Need to render the figure first to get everything it its place...
+def get_textbox_poly(ax, tb):
+     # Need to render the figure first to get everything it its place...
     ax.figure.canvas.draw_idle()
     # Get the bounding box of the textbox without rotation (smalles size).
     tb.rotation_on = False
@@ -136,20 +119,64 @@ def is_collision(ax, lines, tb, hit_tol=1):
     ppgon_data = transform_disp2data.transform(pgon_disp)
     # Make it into a patch
     poly1 = mpl.patches.Polygon(ppgon_data, closed = True, alpha=0.3, color='red', linewidth = None)
-    
+    return poly1
+
+def is_collision(ax, lines, other_tbs, tb, hit_tol=1):
+    ''' Checks to see if the textbox collides with any data points
+        for lines already passed. Very convoluted. 
+
+        The goal is to use the contains_points method of a polygon patch,
+        however we need to be careful about rotating in display coordinates
+        so that there is no distortion from our axis not being square.
+
+        Only work on initial drawing. Does not resize with plot. One day 
+        this should be made into a property or the RotationAwareAnnotation 
+        class, however it currently requires the figure to be redrawn,
+        which takes too much time.  
+
+        ax: axes object for figure
+        lines: all lines being plotted
+        tb: The textbox to see if a line intersects
+        hit_tol: The number of points that are allowed to fall within the 
+                hit box until a collision is detected
+    '''
+   
+    poly1 = get_textbox_poly(ax, tb)
      
     #Check if any lines fall inside
+    p1 = Polygon(poly1.get_xy())
     tb_line = tb.line
     collision = False
     for line in lines:
         if line != tb_line:
-            hit_array = poly1.contains_points(line.get_xydata())
-            # if np.any(hit_array):
-            if np.count_nonzero(hit_array)>hit_tol:
-                collision = True
+            try:
+                line = LineString(line.get_xydata())
+                if p1.intersects(line):
+                    collision = True
+                    return collision
+            except:
+                pass
+    #Check if any other labels fall inside other label boundaries
+    for otb in other_tbs:
+        p2 = Polygon(otb.get_xy())
+        if p1.intersects(p2):
+            collision = True
+            return collision
+        
+    # Check if outside axis
+    xlim = ax.get_xlim()
+    ylim = ax.get_ylim()
+    xx, yy = p1.exterior.coords.xy
+    if np.any(xx > xlim[1]) or np.any(xx < xlim[0]):
+        collision = True
+        return collision
+    if np.any(yy > ylim[1]) or np.any(yy < ylim[0]):
+        collision = True
+        return collision
     
     # Uncomment To see where the hitboxes are   
     # ax.add_patch(poly1) 
+    
 
     return collision
 
@@ -175,7 +202,6 @@ def labelLine(line, x, label=None, align=True, drop_label=False, filter_length =
     ax = line.axes
     xdata = line.get_xdata()
     ydata = line.get_ydata()
-
     f_interp = interp1d(xdata, ydata, kind='quadratic', fill_value='extrapolate')
     xscale = ax.get_xscale()
     if xscale == 'linear':
@@ -192,6 +218,9 @@ def labelLine(line, x, label=None, align=True, drop_label=False, filter_length =
     if mask.sum() == 0:
         raise Exception('The line %s only contains nan!' % line)
 
+    # Make sure x is within range. Place at end if not
+    if (not (np.min(xdata) < x < np.max(xdata))):
+        x = xdata[-2]
     # Find first segment of xdata containing x
     if len(xdata) == 2:
         i = 0
@@ -317,12 +346,21 @@ def labelLines(lines, align=True, xvals=None, check_collision=False, drop_label=
 
     textboxes = []
     for line, x, label in zip(labLines, xvals, labels):
+        xdata = line.get_xdata()
+        if len(xdata) < 2:
+            continue
+        if (not (np.min(xdata) < x < np.max(xdata))):
+            continue
         textboxes.append(labelLine(line, x, label, align, drop_label, filter_length=filter_length, align_length=align_length, **kwargs))
 
+    txt_boundaries = [get_textbox_poly(ax, tb) for tb in textboxes]
+    other_boundaries = []
     if check_collision:
-        for textbox in textboxes:
-            if is_collision(ax, lines, textbox, hit_tol):
+        for i, textbox in enumerate(textboxes):
+            # other_boundaries = [bound for j, bound in enumerate(txt_boundaries) if j != i]
+            if is_collision(ax, lines, other_boundaries, textbox, hit_tol):
                 textbox.set_visible(False)
+            other_boundaries += [get_textbox_poly(ax, textbox)]
 
     return textboxes
 
