@@ -2,7 +2,7 @@
 Automatically labels lines with rotation in Matplotlib
 
 Primarily taken from https://pypi.org/project/matplotlib-label-lines/ but added collision avoidance
-
+~~~~
 
 Example:
 labelLines(lines, 
@@ -10,7 +10,6 @@ labelLines(lines,
         zorder=2.5, 
         xvals = np.linspace(xmin+0.8*xrange, xmin+0.7*xrange, np.size(lines)), 
         check_collision=True,  
-        hit_tol=20, 
         filter_length = 3, 
         ha = 'left', 
         va='bottom', 

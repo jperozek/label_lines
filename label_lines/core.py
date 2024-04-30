@@ -121,7 +121,7 @@ def get_textbox_poly(ax, tb):
     poly1 = mpl.patches.Polygon(ppgon_data, closed = True, alpha=0.3, color='red', linewidth = None)
     return poly1
 
-def is_collision(ax, lines, other_tbs, tb, hit_tol=1):
+def is_collision(ax, lines, other_tbs, tb):
     ''' Checks to see if the textbox collides with any data points
         for lines already passed. Very convoluted. 
 
@@ -137,8 +137,6 @@ def is_collision(ax, lines, other_tbs, tb, hit_tol=1):
         ax: axes object for figure
         lines: all lines being plotted
         tb: The textbox to see if a line intersects
-        hit_tol: The number of points that are allowed to fall within the 
-                hit box until a collision is detected
     '''
    
     poly1 = get_textbox_poly(ax, tb)
@@ -291,7 +289,7 @@ def labelLine(line, x, label=None, align=True, drop_label=False, filter_length =
         
     return txt
         
-def labelLines(lines, align=True, xvals=None, check_collision=False, drop_label=False, filter_length=1, align_length=1, hit_tol=1, **kwargs):
+def labelLines(lines, align=True, xvals=None, check_collision=False, drop_label=False, filter_length=1, align_length=1, **kwargs):
     '''Label all lines with their respective legends.
 
     Parameters
@@ -358,7 +356,7 @@ def labelLines(lines, align=True, xvals=None, check_collision=False, drop_label=
     if check_collision:
         for i, textbox in enumerate(textboxes):
             # other_boundaries = [bound for j, bound in enumerate(txt_boundaries) if j != i]
-            if is_collision(ax, lines, other_boundaries, textbox, hit_tol):
+            if is_collision(ax, lines, other_boundaries, textbox):
                 textbox.set_visible(False)
             other_boundaries += [get_textbox_poly(ax, textbox)]
 
